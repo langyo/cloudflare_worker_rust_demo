@@ -2,5 +2,9 @@ name = "axum"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-05-31"
 
+kv_namespaces = [
+    { binding = "axumtest", id = "65581d6d060745f68ac0010047739a4d" },
+]
+
 [build]
 command = "cargo install -q worker-build && worker-build --release"

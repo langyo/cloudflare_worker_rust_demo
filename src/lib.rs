@@ -17,14 +17,22 @@ async fn fetch(
     console_error_panic_hook::set_once();
     // Ok(router().call(req).await?)
 
-    Ok(axum::http::Response::new(
-        env.kv("axumtest")?
-            .get("abc")
-            .text()
-            .await?
-            .unwrap_or("No key found".to_string())
-            .into(),
-    ))
+    let val = env
+        .kv("axumtest")?
+        .get("abc")
+        .text()
+        .await?
+        .map(|v| v.parse().unwrap_or(0))
+        .unwrap_or(0);
+    let ret = format!("ljyys! Request {} times", val);
+
+    let val = val + 1;
+    env.kv("axumtest")?
+        .put("abc", val.to_string())?
+        .execute()
+        .await?;
+
+    Ok(axum::http::Response::new(ret.into()))
 }
 
 pub async fn root() -> &'static str {

@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
-use worker::{console_error, Env};
+use worker::{console_error, console_log, Env};
 
 use sea_orm::EntityTrait;
 
@@ -17,13 +17,21 @@ unsafe impl Sync for CFEnv {}
 pub fn router(env: Env) -> Router {
     let state = CFEnv { env: Arc::new(env) };
 
-    Router::new().route("/", get(handler)).with_state(state)
+    Router::new()
+        .route("/", get(entry_test))
+        .route("/get", get(handler))
+        .with_state(state)
+}
+
+async fn entry_test() -> Result<impl IntoResponse, (StatusCode, String)> {
+    console_log!("Hello, world!");
+    Ok("Hello, world!".into_response())
 }
 
 async fn handler(State(state): State<CFEnv>) -> Result<impl IntoResponse, (StatusCode, String)> {
     let env = state.env.clone();
     let db = crate::orm::init_db(env).await.map_err(|err| {
-        console_error!("Failed to connect to database: {:?}", err);
+        console_log!("Failed to connect to database: {:?}", err);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to connect to database".to_string(),
@@ -34,7 +42,7 @@ async fn handler(State(state): State<CFEnv>) -> Result<impl IntoResponse, (Statu
         .all(&db)
         .await
         .map_err(|err| {
-            console_error!("Failed to query database: {:?}", err);
+            console_log!("Failed to query database: {:?}", err);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to query database".to_string(),

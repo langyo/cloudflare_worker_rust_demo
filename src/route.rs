@@ -4,7 +4,11 @@ use std::sync::Arc;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
 use worker::{console_error, console_log, Env};
 
-use sea_orm::EntityTrait;
+use sea_orm::{
+    ActiveModelTrait,
+    ActiveValue::{NotSet, Set},
+    EntityTrait,
+};
 
 #[derive(Clone)]
 struct CFEnv {
@@ -18,17 +22,14 @@ pub fn router(env: Env) -> Router {
     let state = CFEnv { env: Arc::new(env) };
 
     Router::new()
-        .route("/", get(entry_test))
-        .route("/get", get(handler))
+        .route("/", get(handler_get))
+        .route("/generate", get(handler_generate))
         .with_state(state)
 }
 
-async fn entry_test() -> Result<impl IntoResponse, (StatusCode, String)> {
-    console_log!("Hello, world!");
-    Ok("Hello, world!".into_response())
-}
-
-async fn handler(State(state): State<CFEnv>) -> Result<impl IntoResponse, (StatusCode, String)> {
+async fn handler_get(
+    State(state): State<CFEnv>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let env = state.env.clone();
     let db = crate::orm::init_db(env).await.map_err(|err| {
         console_log!("Failed to connect to database: {:?}", err);
@@ -57,4 +58,33 @@ async fn handler(State(state): State<CFEnv>) -> Result<impl IntoResponse, (Statu
     })?;
 
     Ok(ret.into_response())
+}
+
+async fn handler_generate(
+    State(state): State<CFEnv>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let env = state.env.clone();
+    let db = crate::orm::init_db(env).await.map_err(|err| {
+        console_log!("Failed to connect to database: {:?}", err);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to connect to database".to_string(),
+        )
+    })?;
+
+    let ret = crate::entity::ActiveModel {
+        id: NotSet,
+        title: Set("ljyys!".to_string()),
+        text: Set("yysnmsl".to_string()),
+    };
+
+    let ret = ret.insert(&db).await.map_err(|err| {
+        console_log!("Failed to insert into database: {:?}", err);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to insert into database".to_string(),
+        )
+    })?;
+
+    Ok(format!("Inserted: {:?}", ret).into_response())
 }

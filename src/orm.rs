@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use wasm_bindgen::JsValue;
 
 use sea_orm::{
@@ -20,6 +20,87 @@ impl std::fmt::Debug for ProxyDb {
 
 impl ProxyDb {
     async fn do_query(env: Arc<Env>, statement: Statement) -> Result<Vec<ProxyRow>> {
+        let sql = statement.sql.clone();
+        let values = match statement.values {
+            Some(Values(values)) => values
+                .iter()
+                .map(|val| match &val {
+                    Value::BigInt(Some(val)) => JsValue::from(val.to_string()),
+                    Value::BigUnsigned(Some(val)) => JsValue::from(val.to_string()),
+                    Value::Int(Some(val)) => JsValue::from(*val),
+                    Value::Unsigned(Some(val)) => JsValue::from(*val),
+                    Value::SmallInt(Some(val)) => JsValue::from(*val),
+                    Value::SmallUnsigned(Some(val)) => JsValue::from(*val),
+                    Value::TinyInt(Some(val)) => JsValue::from(*val),
+                    Value::TinyUnsigned(Some(val)) => JsValue::from(*val),
+
+                    Value::Float(Some(val)) => JsValue::from_f64(*val as f64),
+                    Value::Double(Some(val)) => JsValue::from_f64(*val),
+
+                    Value::Bool(Some(val)) => JsValue::from(*val),
+                    Value::Bytes(Some(val)) => JsValue::from(format!(
+                        "X'{}'",
+                        val.iter()
+                            .map(|byte| format!("{:02x}", byte))
+                            .collect::<String>()
+                    )),
+                    Value::Char(Some(val)) => JsValue::from(val.to_string()),
+                    Value::Json(Some(val)) => JsValue::from(val.to_string()),
+                    Value::String(Some(val)) => JsValue::from(val.to_string()),
+
+                    Value::ChronoDate(Some(val)) => JsValue::from(val.to_string()),
+                    Value::ChronoDateTime(Some(val)) => JsValue::from(val.to_string()),
+                    Value::ChronoDateTimeLocal(Some(val)) => JsValue::from(val.to_string()),
+                    Value::ChronoDateTimeUtc(Some(val)) => JsValue::from(val.to_string()),
+                    Value::ChronoDateTimeWithTimeZone(Some(val)) => JsValue::from(val.to_string()),
+
+                    _ => JsValue::NULL,
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+
+        console_log!("SQL query values: {:?}", values);
+        let ret = env.d1("test-d1")?.prepare(sql).bind(&values)?.all().await?;
+        if let Some(message) = ret.error() {
+            return Err(anyhow!(message.to_string()));
+        }
+
+        let ret = ret.results::<serde_json::Value>()?;
+        let ret = ret
+            .iter()
+            .map(|row| {
+                let mut values = BTreeMap::new();
+                for (key, value) in row.as_object().unwrap() {
+                    values.insert(
+                        key.clone(),
+                        match &value {
+                            serde_json::Value::Bool(val) => Value::Bool(Some(*val)),
+                            serde_json::Value::Number(val) => {
+                                if val.is_i64() {
+                                    Value::BigInt(Some(val.as_i64().unwrap()))
+                                } else if val.is_u64() {
+                                    Value::BigUnsigned(Some(val.as_u64().unwrap()))
+                                } else {
+                                    Value::Double(Some(val.as_f64().unwrap()))
+                                }
+                            }
+                            serde_json::Value::String(val) => {
+                                Value::String(Some(Box::new(val.clone())))
+                            }
+                            _ => unreachable!("Unsupported JSON value"),
+                        },
+                    );
+                }
+                ProxyRow { values }
+            })
+            .collect();
+        console_log!("SQL query result: {:?}", ret);
+
+        Ok(ret)
+    }
+
+    async fn do_execute(env: Arc<Env>, statement: Statement) -> Result<ProxyExecResult> {
         let sql = statement.sql.clone();
         let values = match statement.values {
             Some(Values(values)) => values
@@ -60,18 +141,22 @@ impl ProxyDb {
             None => Vec::new(),
         };
 
-        let ret = env.d1("ljyys")?.prepare(sql).bind(&values)?.all().await?;
-        if let Some(message) = ret.error() {
-            return Err(anyhow!(message.to_string()));
-        }
-        let ret = ret.results::<serde_json::Value>()?;
-        for (index, item) in ret.iter().enumerate() {
-            console_log!("#{}: {}", index, item.to_string());
-        }
+        let ret = env
+            .d1("test-d1")?
+            .prepare(sql)
+            .bind(&values)?
+            .raw_js_value()
+            .await?;
+        console_log!("SQL execute result: {:?}", ret);
+        // FIXME: Cloudflare 官方并没有在 worker 库给出获取 last_insert_id 和 rows_affected 的方法
+        //        然而这部分数据其实是可以请求到的，在返回结果的 meta 键中
+        //        具体参考 https://developers.cloudflare.com/api/operations/cloudflare-d1-raw-database-query
 
-        // TODO: 暂时先不返回，我瞅一眼结果长啥样
-
-        Ok(vec![])
+        Ok(ProxyExecResult {
+            // FIXME: 这里是假数据
+            last_insert_id: 1,
+            rows_affected: 1,
+        })
     }
 }
 
@@ -93,10 +178,16 @@ impl ProxyDatabaseTrait for ProxyDb {
 
     async fn execute(&self, statement: Statement) -> Result<ProxyExecResult, DbErr> {
         console_log!("SQL execute: {:?}", statement);
-        let sql = statement.sql.clone();
 
-        // TODO: 直接与 self.env 交互
-        // 可能根据需要得带上 wasm_bindgen_futures + oneshot 以规避传递的堆对象没实现 Send + Sync 导致无法交换的问题
+        let env = self.env.clone();
+        let (tx, rx) = oneshot::channel();
+        wasm_bindgen_futures::spawn_local(async move {
+            let ret = Self::do_execute(env, statement).await;
+            tx.send(ret).unwrap();
+        });
+
+        let ret = rx.await.unwrap();
+        ret.map_err(|err| DbErr::Conn(RuntimeErr::Internal(err.to_string())))?;
 
         Ok(ProxyExecResult {
             last_insert_id: 1,

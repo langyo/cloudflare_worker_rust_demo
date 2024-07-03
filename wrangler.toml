@@ -3,11 +3,11 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2024-05-31"
 
 [[kv_namespaces]]
-binding = "ljyys"
+binding = "test-kv"
 id = "65581d6d060745f68ac0010047739a4d"
 
 [[d1_databases]]
-binding = "ljyys"
+binding = "test-d1"
 database_name = "axumtest"
 database_id = "c6d9ea8b-10a9-4aca-88d2-e5352167303b"
 

@@ -3,7 +3,9 @@ use axum::{body::Body, response::Response};
 use tower_service::Service;
 use worker::{event, Context, Env, HttpRequest};
 
-mod route;
+pub(crate) mod entity;
+pub(crate) mod orm;
+pub(crate) mod route;
 
 // https://developers.cloudflare.com/workers/languages/rust
 #[event(fetch)]

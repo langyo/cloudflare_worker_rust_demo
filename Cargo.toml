@@ -31,3 +31,12 @@ tower-service = "0.3.2"
 console_error_panic_hook = { version = "0.1" }
 wasm-bindgen-futures = { version = "0.4" }
 oneshot = "0.1"
+
+sea-orm = { version = "1.0.0-rc.7", default-features = false, features = [
+    "macros",
+    "proxy",
+    "with-uuid",
+    "with-chrono",
+    "with-json",
+    "debug-print",
+] }

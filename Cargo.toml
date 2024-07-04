@@ -1,5 +1,5 @@
 [package]
-name = "axum"
+name = "_axum"
 version = "0.1.0"
 edition = "2021"
 authors = ["伊欧 <langyo.china@gmail.com>"]
@@ -42,4 +42,5 @@ sea-orm = { version = "1.0.0-rc.7", default-features = false, features = [
 ] }
 
 [patch.crates-io]
+worker = { git = "https://github.com/langyo/workers-rs.git", branch = "main" }
 sea-orm = { git = "https://github.com/langyo/sea-orm.git", branch = "async-proxy-conn" }

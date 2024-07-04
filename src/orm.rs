@@ -6,7 +6,7 @@ use sea_orm::{
     ConnectionTrait, Database, DatabaseConnection, DbBackend, DbErr, ProxyDatabaseTrait,
     ProxyExecResult, ProxyRow, RuntimeErr, Schema, Statement, Value, Values,
 };
-use worker::{console_log, Env};
+use worker::{console_log, console_warn, Env};
 
 struct ProxyDb {
     env: Arc<Env>,
@@ -145,17 +145,23 @@ impl ProxyDb {
             .d1("test-d1")?
             .prepare(sql)
             .bind(&values)?
-            .raw_js_value()
-            .await?;
+            .run()
+            .await?
+            .meta()?;
         console_log!("SQL execute result: {:?}", ret);
-        // FIXME: Cloudflare 官方并没有在 worker 库给出获取 last_insert_id 和 rows_affected 的方法
-        //        然而这部分数据其实是可以请求到的，在返回结果的 meta 键中
-        //        具体参考 https://developers.cloudflare.com/api/operations/cloudflare-d1-raw-database-query
+
+        let last_insert_id = ret
+            .as_ref()
+            .map(|meta| meta.last_row_id.unwrap_or(0))
+            .unwrap_or(0) as u64;
+        let rows_affected = ret
+            .as_ref()
+            .map(|meta| meta.rows_written.unwrap_or(0))
+            .unwrap_or(0) as u64;
 
         Ok(ProxyExecResult {
-            // FIXME: 这里是假数据
-            last_insert_id: 1,
-            rows_affected: 1,
+            last_insert_id,
+            rows_affected,
         })
     }
 }
@@ -187,12 +193,7 @@ impl ProxyDatabaseTrait for ProxyDb {
         });
 
         let ret = rx.await.unwrap();
-        ret.map_err(|err| DbErr::Conn(RuntimeErr::Internal(err.to_string())))?;
-
-        Ok(ProxyExecResult {
-            last_insert_id: 1,
-            rows_affected: 1,
-        })
+        ret.map_err(|err| DbErr::Conn(RuntimeErr::Internal(err.to_string())))
     }
 }
 
